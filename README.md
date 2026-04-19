@@ -148,3 +148,68 @@ for (int i = 0; i < 64; i++)
 ## Updating Offsets
 
 Offsets can drift after game updates. The project includes a pattern scanner in `Utils/OffsetUpdater.hpp` and a `Signatures` namespace with byte patterns for dynamic resolution. Run the offset updater or re-dump offsets using a tool like [cs2-dump](https://github.com/a2x/cs2-dump) after each game patch.
+
+#pragma once
+#include "MenuConfig.hpp"
+#include "Entity.h"
+
+namespace GlowESP
+{
+    inline bool Enable = false;
+    inline ImColor EnemyColor = ImColor(255, 50, 50, 255);
+    inline ImColor TeamColor = ImColor(50, 150, 255, 255);
+
+    inline void Run(const CEntity& LocalEntity)
+    {
+        if (!MenuConfig::ShowChams) return;
+
+        for (int i = 0; i < 64; i++)
+        {
+            DWORD64 entityAddress = 0;
+            if (!ProcessMgr.ReadMemory<DWORD64>(gGame.GetEntityListEntry() + (i + 1) * 0x70, entityAddress))
+                continue;
+
+            if (entityAddress == LocalEntity.Controller.Address)
+                continue;
+
+            CEntity Entity;
+            if (!Entity.UpdateController(entityAddress))
+                continue;
+
+            if (!Entity.UpdatePawn(Entity.Pawn.Address))
+                continue;
+
+            if (MenuConfig::TeamCheck && Entity.Controller.TeamID == LocalEntity.Controller.TeamID)
+                continue;
+
+            if (!Entity.IsAlive())
+                continue;
+
+            bool isEnemy = Entity.Controller.TeamID != LocalEntity.Controller.TeamID;
+            ImColor glowColor = isEnemy ? MenuConfig::ChamsEnemyColor : MenuConfig::ChamsTeamColor;
+
+            DWORD64 pawnAddr = Entity.Pawn.Address;
+            DWORD64 glowBase = pawnAddr + 0xCC0; // m_Glow
+
+            int currentGlowType = 0;
+            ProcessMgr.ReadMemory<int>(glowBase + 0x30, currentGlowType);
+            if (currentGlowType != 3) {
+                int newType = 3;
+                ProcessMgr.WriteMemory<int>(glowBase + 0x30, newType);
+            }
+
+            // Write Color (RGBA layout for CS2 Color struct)
+            DWORD colorArgb = ((DWORD)(glowColor.Value.w * 255) << 24) |
+                              ((DWORD)(glowColor.Value.z * 255) << 16) |
+                              ((DWORD)(glowColor.Value.y * 255) << 8) |
+                              ((DWORD)(glowColor.Value.x * 255));
+            ProcessMgr.WriteMemory<DWORD>(glowBase + 0x40, colorArgb);
+
+            // Keep it glowing
+            bool bTrue = true;
+            ProcessMgr.WriteMemory<bool>(glowBase + 0x51, bTrue);
+        }
+    }
+}
+```
+
